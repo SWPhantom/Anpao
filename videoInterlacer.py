@@ -10,13 +10,14 @@ def getNextFrame(video):
 
   ret, frame = video.read()
   while not ret:
-    print(f'{ret} returned')
     blank -= 1
     if blank <= 0:
-      print('blanks are 0!!')
+      print(f'No valid frames in {N} tries')
       return None
     ret, frame = video.read()
   
+  if blank < N:
+    print(f'Valid frame after {N - blank} tries')
   return frame
 
 # Interlaces images row by row.
@@ -29,9 +30,13 @@ def interlace(imgL, imgR, h, w):
     return inter
 
 
-inputFile1 = './input/fixedMove1.MP4'
-inputFile2 = './input/fixedMove2.MP4'
-outputFile = './output/' + datetime.now().strftime("%Y-%m-%d-%H:%M:%S") + 'interlace.mp4'
+
+inputFile1 = './input/redLight1a.MP4'
+inputFile2 = './input/redLight1b.MP4'
+# outputFile = 'output/' + datetime.now().strftime("%Y-%m-%d-%H:%M:%S") + 'interlace.mp4'
+outputFile = f'{datetime.now().strftime("%Y-%m-%d-%H:%M:%S")}interlace.mp4'
+#outputFile = './output/test.mp4'
+
 
 def main():
   v1 = cv2.VideoCapture(inputFile1)
@@ -40,10 +45,9 @@ def main():
 
   print(f'writing to {outputFile}')
   out = cv2.VideoWriter(outputFile, cv2.VideoWriter_fourcc('m','p','4','v'), fps, (int(v1.get(3)), int(v1.get(4))))
-  frames = 1000
 
-  frame1a = np.zeros((1920, 1080, 3), np.uint8)
-  frame2a = np.zeros((1920, 1080, 3), np.uint8)
+  frame1a = np.zeros((1080, 1920, 3), np.uint8)
+  frame2a = np.zeros((1080, 1920, 3), np.uint8)
 
   # Synchronization
   # Temporal
@@ -81,11 +85,8 @@ def main():
   # Temporary, as alignment should be done per frame
   horizontalTranslation = 0
   verticalTranslation = 0
+  inter = interlace(frame1a, frame2a, 1080, 1920)
   while (v1.isOpened() and v2.isOpened()):
-    translate1 = np.float32([[1, 0, horizontalTranslation],[0, 1, verticalTranslation]])
-    translate2 = np.float32([[1, 0, -horizontalTranslation],[0, 1, -verticalTranslation]])
-    inter = interlace(cv2.warpAffine(frame1a, translate1, (frame1a.shape[1], frame1a.shape[0])), cv2.warpAffine(frame2a, translate2, (frame2a.shape[1], frame2a.shape[0])), 1080, 1920)
-    
     cv2.imshow('alignment', inter)
     user = input("h for horizonal alignment, v for vertical alignment, b for both new frames. c for continue:")
     user2 = input("amount:")
@@ -102,26 +103,73 @@ def main():
       print("wrong!")
       continue
 
-    cv2.waitKey(10)
-    
-
-  # Loop until the end of the video and interlace the images
-  while (v1.isOpened() and v2.isOpened()):
     translate1 = np.float32([[1, 0, horizontalTranslation],[0, 1, verticalTranslation]])
     translate2 = np.float32([[1, 0, -horizontalTranslation],[0, 1, -verticalTranslation]])
+    inter = interlace(cv2.warpAffine(frame1a, translate1, (frame1a.shape[1], frame1a.shape[0])), cv2.warpAffine(frame2a, translate2, (frame2a.shape[1], frame2a.shape[0])), 1080, 1920)
 
+    cv2.waitKey(10)
+    
+  cv2.destroyAllWindows()
+  # Loop until the end of the video and interlace the images
+  translate1 = np.float32([[1, 0, horizontalTranslation],[0, 1, verticalTranslation]])
+  translate2 = np.float32([[1, 0, -horizontalTranslation],[0, 1, -verticalTranslation]])
+  t1 = translate1
+  t2 = translate2
+
+  while (v1.isOpened() and v2.isOpened()):
     frame1a = getNextFrame(v1)
     frame2a = getNextFrame(v2)
 
     if frame1a is None or frame2a is None:
-      break
+      print('No new frame!')
 
     #frame1a = cv2.resize(frame1a, (1920, 1080), fx = 0, fy = 0, interpolation = cv2.INTER_CUBIC)
     #frame1b = cv2.resize(frame1b, (1920, 1080), fx = 0, fy = 0, interpolation = cv2.INTER_CUBIC)
 
-    inter = interlace(cv2.warpAffine(frame1a, translate1, (frame1a.shape[1], frame1a.shape[0])), cv2.warpAffine(frame2a, translate2, (frame2a.shape[1], frame2a.shape[0])), 1080, 1920)
 
-    cv2.imshow("test", inter)
+    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+    gray1 = cv2.cvtColor(frame1a, cv2.COLOR_BGR2GRAY)
+    gray2 = cv2.cvtColor(frame2a, cv2.COLOR_BGR2GRAY)
+
+    minigray1 = cv2.resize(gray1, (480, 270), interpolation = cv2.INTER_AREA)
+    minigray2 = cv2.resize(gray2, (480, 270), interpolation = cv2.INTER_AREA)
+    cv2.imshow('gray1', minigray1)
+    cv2.imshow('gray2', minigray2)
+
+    # input('beforeDetection')
+
+    faces1 = face_cascade.detectMultiScale(gray1, 1.04, 5)
+    faces2 = face_cascade.detectMultiScale(gray2, 1.04, 5)
+
+    p1 = (0, 0)
+    p2 = (1, 1)
+
+    if len(faces1) > 0 and len(faces2) > 0:
+      #calculate transform
+      face1 = faces1[0]
+      face2 = faces2[0]
+
+      dx = face1[0] - face2[0]
+      dy = face1[1] - face2[1]
+      p1 = (face1[0], face1[1])
+      p2 = (face2[0], face2[1])
+      # t1 = np.float32([[1, 0, dx / 2],[0, 1, dy / 2]])
+      # t1 = np.float32([[1, 0, -dx / 2],[0, 1, -dy / 2]])
+    else:
+      t1 = translate1
+      t2 = translate2
+
+
+
+    inter = interlace(cv2.warpAffine(frame1a, t1, (frame1a.shape[1], frame1a.shape[0])), cv2.warpAffine(frame2a, t2, (frame2a.shape[1], frame2a.shape[0])), 1080, 1920)
+    debug = cv2.line(inter, p1, p2, (0, 255, 0), 2)
+    for (x, y, w, h) in faces1:
+      debug = cv2.rectangle(debug, (x, y), (x+w, y+h), (255, 0, 0), 1)
+
+    for (x, y, w, h) in faces2:
+      debug = cv2.rectangle(debug, (x, y), (x+w, y+h), (0, 0, 255), 1)
+    
+    cv2.imshow("test", debug)
     out.write(inter)
 
     # define q as the exit button
